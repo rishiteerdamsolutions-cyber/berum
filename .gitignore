@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+.pycache/
+*.pyc
+
+# Local data
+data/
+products.json
+lockouts.json
+.berum_device_id
+
