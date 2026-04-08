@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Berum Admin</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="container">
+      <header class="header">
+        <div>
+          <h1>Berum Admin</h1>
+          <p class="muted">Create a merchant API key and manage products.</p>
+        </div>
+        <nav class="nav">
+          <a href="/">Test Page</a>
+          <a href="/docs" target="_blank" rel="noreferrer">API Docs</a>
+        </nav>
+      </header>
+
+      <section class="card">
+        <h2>Create Merchant (returns API key once)</h2>
+        <div class="row">
+          <input id="merchantName" class="input" placeholder="Merchant name" />
+          <button id="createMerchant" class="btn">Create</button>
+        </div>
+        <pre id="merchantOut" class="pre"></pre>
+      </section>
+
+      <section class="card">
+        <h2>Products</h2>
+        <div class="row">
+          <input id="apiKey" class="input" placeholder="Paste X-Berum-Api-Key" />
+          <button id="refresh" class="btn">Refresh</button>
+        </div>
+        <div class="grid2">
+          <input id="name" class="input" placeholder="Product name" />
+          <input id="currency" class="input" placeholder="Currency (INR)" value="INR" />
+          <input id="mrp" class="input" placeholder="MRP" />
+          <input id="base" class="input" placeholder="Base price" />
+          <input id="floor" class="input" placeholder="Floor price" />
+        </div>
+        <div class="row">
+          <button id="createProduct" class="btn">Add Product</button>
+        </div>
+        <pre id="productsOut" class="pre"></pre>
+      </section>
+    </div>
+
+    <script>
+      const $ = (id) => document.getElementById(id);
+
+      function apiKey() {
+        return $("apiKey").value.trim();
+      }
+
+      function headers() {
+        return {
+          "Content-Type": "application/json",
+          "X-Berum-Api-Key": apiKey(),
+        };
+      }
+
+      async function createMerchant() {
+        const name = $("merchantName").value.trim();
+        const res = await fetch("/v1/merchants", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name }),
+        });
+        const data = await res.json();
+        $("merchantOut").textContent = JSON.stringify(data, null, 2);
+        if (data.api_key) $("apiKey").value = data.api_key;
+      }
+
+      async function refresh() {
+        const res = await fetch("/v1/products", { headers: headers() });
+        const data = await res.json();
+        $("productsOut").textContent = JSON.stringify(data, null, 2);
+      }
+
+      async function createProduct() {
+        const payload = {
+          name: $("name").value.trim(),
+          currency: ($("currency").value.trim() || "INR").toUpperCase(),
+          mrp: Number($("mrp").value),
+          base_price: Number($("base").value),
+          floor_price: Number($("floor").value),
+        };
+        const res = await fetch("/v1/products", {
+          method: "POST",
+          headers: headers(),
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          $("productsOut").textContent = JSON.stringify(data, null, 2);
+          return;
+        }
+        await refresh();
+      }
+
+      $("createMerchant").addEventListener("click", createMerchant);
+      $("refresh").addEventListener("click", refresh);
+      $("createProduct").addEventListener("click", createProduct);
+    </script>
+  </body>
+</html>
+

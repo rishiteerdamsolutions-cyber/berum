@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Berum Test Page</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="container">
+      <header class="header">
+        <div>
+          <h1>Berum Test Page</h1>
+          <p class="muted">Negotiate a price → finalize a quote → click test payment.</p>
+        </div>
+        <nav class="nav">
+          <a href="/admin">Admin</a>
+          <a href="/docs" target="_blank" rel="noreferrer">API Docs</a>
+        </nav>
+      </header>
+
+      <section class="card">
+        <h2>Merchant API Key</h2>
+        <div class="row">
+          <input id="apiKey" class="input" placeholder="Paste X-Berum-Api-Key" />
+          <button id="loadProducts" class="btn">Load Products</button>
+        </div>
+        <p id="apiKeyHint" class="muted small"></p>
+      </section>
+
+      <section class="card">
+        <h2>Customer</h2>
+        <div class="grid3">
+          <input id="deviceId" class="input" placeholder="device_id (any string)" />
+          <input id="email" class="input" placeholder="email" />
+          <input id="mobile" class="input" placeholder="mobile" />
+        </div>
+        <p class="muted small">Tip: use a stable device_id to see 7-day lockout after payment.</p>
+      </section>
+
+      <section class="card">
+        <h2>Product</h2>
+        <div class="row">
+          <select id="productId" class="input"></select>
+          <button id="start" class="btn">Start Berum</button>
+        </div>
+        <p id="productInfo" class="muted small"></p>
+      </section>
+
+      <section class="card">
+        <h2>Negotiation</h2>
+        <div id="chat" class="chat"></div>
+        <div class="row">
+          <input id="offer" class="input" placeholder="Enter your bargain price" />
+          <button id="sendOffer" class="btn" disabled>Send</button>
+        </div>
+        <div class="row">
+          <button id="finalize" class="btn secondary" disabled>Finalize Quote</button>
+          <button id="pay" class="btn success" disabled>Test Pay</button>
+        </div>
+        <div id="status" class="muted small"></div>
+      </section>
+    </div>
+
+    <script>
+      const $ = (id) => document.getElementById(id);
+      const chat = $("chat");
+
+      let products = [];
+      let sessionId = null;
+      let quoteToken = null;
+
+      function apiKey() {
+        return $("apiKey").value.trim();
+      }
+
+      function headers() {
+        return {
+          "Content-Type": "application/json",
+          "X-Berum-Api-Key": apiKey(),
+        };
+      }
+
+      function addLine(who, text) {
+        const el = document.createElement("div");
+        el.className = "line " + who;
+        el.innerHTML = `<div class="bubble"><div class="who">${who}</div><div>${text}</div></div>`;
+        chat.appendChild(el);
+        chat.scrollTop = chat.scrollHeight;
+      }
+
+      function setStatus(text) {
+        $("status").textContent = text;
+      }
+
+      function resetFlow() {
+        sessionId = null;
+        quoteToken = null;
+        $("sendOffer").disabled = true;
+        $("finalize").disabled = true;
+        $("pay").disabled = true;
+        $("offer").value = "";
+        chat.innerHTML = "";
+        setStatus("");
+      }
+
+      async function loadProducts() {
+        resetFlow();
+        $("productId").innerHTML = "";
+        try {
+          const res = await fetch("/v1/products", { headers: headers() });
+          if (!res.ok) throw await res.json();
+          products = await res.json();
+          if (!products.length) {
+            $("apiKeyHint").textContent = "No products yet. Create one in Admin.";
+            return;
+          }
+          $("apiKeyHint").textContent = "";
+          for (const p of products) {
+            const opt = document.createElement("option");
+            opt.value = p.id;
+            opt.textContent = `${p.name} (MRP ₹${p.mrp})`;
+            $("productId").appendChild(opt);
+          }
+          showProductInfo();
+        } catch (e) {
+          $("apiKeyHint").textContent = "Could not load products. Check API key and server.";
+        }
+      }
+
+      function showProductInfo() {
+        const id = $("productId").value;
+        const p = products.find((x) => x.id === id);
+        if (!p) {
+          $("productInfo").textContent = "";
+          return;
+        }
+        $("productInfo").textContent = `Base ₹${p.base_price} | Floor ₹${p.floor_price} | Currency ${p.currency}`;
+      }
+
+      async function startSession() {
+        resetFlow();
+        const product_id = $("productId").value;
+        const device_id = $("deviceId").value.trim() || "demo-device";
+        const email = $("email").value.trim();
+        const mobile = $("mobile").value.trim();
+
+        addLine("customer", `I want to bargain for product ${product_id}.`);
+        try {
+          const res = await fetch("/v1/bargain/sessions", {
+            method: "POST",
+            headers: headers(),
+            body: JSON.stringify({ product_id, device_id, email, mobile }),
+          });
+          if (!res.ok) {
+            const err = await res.json();
+            if (err?.detail?.code === "LOCKED") {
+              addLine("salesperson", err.detail.message + " Until: " + err.detail.until);
+              setStatus("Locked");
+              return;
+            }
+            throw err;
+          }
+          const data = await res.json();
+          sessionId = data.session_id;
+          addLine("salesperson", data.message);
+          $("sendOffer").disabled = false;
+          setStatus(`Session: ${sessionId}`);
+        } catch (e) {
+          addLine("salesperson", "Something went wrong starting the session.");
+        }
+      }
+
+      async function sendOffer() {
+        const offered_price = Number($("offer").value);
+        if (!sessionId) return;
+        if (!Number.isFinite(offered_price) || offered_price <= 0) {
+          setStatus("Enter a valid number");
+          return;
+        }
+        addLine("customer", `₹${offered_price}`);
+        $("offer").value = "";
+
+        const res = await fetch(`/v1/bargain/sessions/${sessionId}/offer`, {
+          method: "POST",
+          headers: headers(),
+          body: JSON.stringify({ offered_price }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          addLine("salesperson", data?.detail || "Error");
+          return;
+        }
+        addLine("salesperson", data.message);
+        setStatus(`Attempts left: ${data.attempts_left} | Status: ${data.status}`);
+
+        if (data.status === "ACCEPTED") {
+          $("finalize").disabled = false;
+        }
+        if (data.status === "FAILED") {
+          $("sendOffer").disabled = true;
+        }
+      }
+
+      async function finalizeQuote() {
+        if (!sessionId) return;
+        const res = await fetch(`/v1/bargain/sessions/${sessionId}/finalize`, {
+          method: "POST",
+          headers: headers(),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          addLine("salesperson", data?.detail || "Finalize failed");
+          return;
+        }
+        quoteToken = data.quote_token;
+        addLine("salesperson", `Quote created for ₹${data.amount} (${data.currency}). Expires at ${data.expires_at}.`);
+        $("pay").disabled = false;
+        setStatus(`Quote: ${quoteToken}`);
+      }
+
+      async function testPay() {
+        if (!quoteToken) return;
+        const res = await fetch("/v1/payments/test", {
+          method: "POST",
+          headers: headers(),
+          body: JSON.stringify({ quote_token: quoteToken }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          addLine("salesperson", data?.detail || "Payment failed");
+          return;
+        }
+        addLine("salesperson", `Payment SUCCESS. Receipt: ${data.payment_id} | Amount: ₹${data.amount} ${data.currency}`);
+        $("pay").disabled = true;
+        $("sendOffer").disabled = true;
+        $("finalize").disabled = true;
+        setStatus("Paid. Lockout will apply for this product for 7 days.");
+      }
+
+      $("loadProducts").addEventListener("click", loadProducts);
+      $("productId").addEventListener("change", showProductInfo);
+      $("start").addEventListener("click", startSession);
+      $("sendOffer").addEventListener("click", sendOffer);
+      $("finalize").addEventListener("click", finalizeQuote);
+      $("pay").addEventListener("click", testPay);
+
+      // convenience
+      $("deviceId").value = localStorage.getItem("berum_device_id") || ("dev_" + Math.random().toString(16).slice(2));
+      localStorage.setItem("berum_device_id", $("deviceId").value);
+    </script>
+  </body>
+</html>
+
