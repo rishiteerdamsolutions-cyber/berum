@@ -1,9 +1,18 @@
 import sqlite3
+import os
 from pathlib import Path
 
 
-DATA_DIR = Path(__file__).resolve().parent.parent / "data"
-DB_PATH = DATA_DIR / "berum.sqlite3"
+_DEFAULT_DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+_ENV_DB_PATH = os.environ.get("BERUM_DB_PATH")
+_ENV_DATA_DIR = os.environ.get("BERUM_DATA_DIR")
+
+if _ENV_DB_PATH:
+    DB_PATH = Path(_ENV_DB_PATH).expanduser()
+    DATA_DIR = DB_PATH.parent
+else:
+    DATA_DIR = Path(_ENV_DATA_DIR).expanduser() if _ENV_DATA_DIR else _DEFAULT_DATA_DIR
+    DB_PATH = DATA_DIR / "berum.sqlite3"
 
 
 def connect() -> sqlite3.Connection:
@@ -99,4 +108,3 @@ def migrate() -> None:
         conn.commit()
     finally:
         conn.close()
-

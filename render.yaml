@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: berum
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn api.app:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: BERUM_DB_PATH
+        value: /var/data/berum.sqlite3
+    disk:
+      name: berum-data
+      mountPath: /var/data
+      sizeGB: 1
