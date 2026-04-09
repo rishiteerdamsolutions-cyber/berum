@@ -26,6 +26,7 @@ uvicorn api.app:app --reload --port 8000
 - Admin UI: `http://localhost:8000/admin`
 - Bargain test page: `http://localhost:8000/`
 - API docs (Swagger): `http://localhost:8000/docs`
+- Readiness check: `http://localhost:8000/ready`
 
 ## Deploy on Render
 
@@ -36,6 +37,7 @@ This API uses SQLite by default. On Render, use a persistent disk and point the 
 1) In Render, create a new **Blueprint** from this repo (it will pick up `render.yaml`).
 2) Deploy. After deploy:
    - Open `/health` to confirm it’s up.
+   - Open `/ready` to confirm it’s ready to serve API traffic.
    - Open `/admin` to create a merchant API key.
 
 ### Option B: Manual web service

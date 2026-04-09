@@ -4,7 +4,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi.responses import JSONResponse
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -39,6 +40,9 @@ from .security import (
 
 APP_DIR = Path(__file__).resolve().parent
 STATIC_DIR = APP_DIR / "static"
+
+APP_READY = False
+STARTUP_ERROR: Optional[str] = None
 
 
 def utcnow() -> datetime:
@@ -121,7 +125,33 @@ app = FastAPI(title="Berum API", version="0.1.0")
 
 @app.on_event("startup")
 def _startup():
-    db.migrate()
+    global APP_READY, STARTUP_ERROR
+    try:
+        db.migrate()
+        APP_READY = True
+    except Exception as e:
+        STARTUP_ERROR = f"{type(e).__name__}: {e}"
+        APP_READY = False
+
+
+@app.middleware("http")
+async def _readiness_guard(request: Request, call_next):
+    """
+    If the app is still starting (or failed to start), return a JSON 503 for API routes.
+    This avoids clients receiving HTML from our app when they expect JSON.
+    """
+    if APP_READY:
+        return await call_next(request)
+
+    path = request.url.path
+    if path.startswith("/v1/") or path == "/v1" or path.startswith("/docs") or path.startswith("/openapi"):
+        payload = {"ok": False, "code": "STARTING", "message": "Service is starting up. Retry shortly."}
+        if STARTUP_ERROR:
+            payload["code"] = "STARTUP_FAILED"
+            payload["message"] = "Service failed to start. Check server logs."
+        return JSONResponse(status_code=503, content=payload, headers={"Retry-After": "10"})
+
+    return await call_next(request)
 
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -139,7 +169,14 @@ def admin_page():
 
 @app.get("/health")
 def health():
-    return {"ok": True, "time": utcnow().isoformat()}
+    return {"ok": True, "ready": APP_READY, "time": utcnow().isoformat(), "error": STARTUP_ERROR}
+
+
+@app.get("/ready")
+def ready():
+    if not APP_READY:
+        raise HTTPException(status_code=503, detail={"code": "NOT_READY", "error": STARTUP_ERROR})
+    return {"ok": True}
 
 
 # -----------------
